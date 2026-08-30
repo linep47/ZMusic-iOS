@@ -22,19 +22,24 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Lincb522/NeteaseCloudMusicAPI-Swift.git upstream
 
-      - name: Apply iOS 15 overrides
+      - name: Apply ZMusic v0.2 overrides
         run: |
           cp "$GITHUB_WORKSPACE/Overrides/ContentView.swift" upstream/Example/Sources/ContentView.swift
           cp "$GITHUB_WORKSPACE/Overrides/SearchView.swift" upstream/Example/Sources/SearchView.swift
           cp "$GITHUB_WORKSPACE/Overrides/ZMusicPlayerView.swift" upstream/Example/Sources/ZMusicPlayerView.swift
+          cp "$GITHUB_WORKSPACE/Overrides/ToplistView.swift" upstream/Example/Sources/ToplistView.swift
+          cp "$GITHUB_WORKSPACE/Overrides/PlaylistView.swift" upstream/Example/Sources/PlaylistView.swift
+          cp "$GITHUB_WORKSPACE/Overrides/ZMusicSessionStore.swift" upstream/Example/Sources/ZMusicSessionStore.swift
           cp "$GITHUB_WORKSPACE/Overrides/project.yml" upstream/Example/project.yml
 
-          grep -rl "NavigationStack" upstream/Example/Sources \
-            | xargs sed -i '' 's/NavigationStack/NavigationView/g'
-          
+          python3 "$GITHUB_WORKSPACE/Overrides/patch_v02.py"
+
+          grep -rl "NavigationStack" upstream/Example/Sources | xargs sed -i '' 's/NavigationStack/NavigationView/g'
+
           brew install xcodegen
           cd upstream/Example
           xcodegen generate
+
 
       - name: Detect Xcode scheme
         id: scheme
