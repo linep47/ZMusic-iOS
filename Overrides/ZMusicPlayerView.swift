@@ -9,32 +9,33 @@ struct MiniPlayerView: View {
             Button(action: openPlayer) {
                 HStack(spacing: 12) {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(.quaternary)
+                        .fill(Color.secondary.opacity(0.15))
                         .frame(width: 42, height: 42)
-                        .overlay {
+                        .overlay(
                             Image(systemName: "music.note")
-                                .foregroundStyle(.secondary)
-                        }
+                                .foregroundColor(.secondary)
+                        )
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(vm.playSongName.isEmpty ? "正在加载…" : vm.playSongName)
                             .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
                             .lineLimit(1)
 
                         Text(vm.playStatus.isEmpty ? "ZMusic" : vm.playStatus)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PlainButtonStyle())
 
             Spacer()
 
             if vm.isPlayLoading {
                 ProgressView()
-                    .controlSize(.small)
+                    .progressViewStyle(CircularProgressViewStyle())
             } else {
                 Button {
                     togglePlayback()
@@ -42,13 +43,17 @@ struct MiniPlayerView: View {
                     Image(systemName: vm.isPlaying ? "stop.fill" : "play.fill")
                         .font(.title3)
                         .frame(width: 36, height: 36)
+                        .foregroundColor(.primary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
         .shadow(radius: 6, y: 2)
     }
 
@@ -63,21 +68,21 @@ struct MiniPlayerView: View {
 
 struct NowPlayingView: View {
     @ObservedObject var vm: DemoViewModel
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             VStack(spacing: 28) {
                 Spacer()
 
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(.quaternary)
+                    .fill(Color.secondary.opacity(0.15))
                     .aspectRatio(1, contentMode: .fit)
-                    .overlay {
+                    .overlay(
                         Image(systemName: "music.note")
                             .font(.system(size: 72, weight: .light))
-                            .foregroundStyle(.secondary)
-                    }
+                            .foregroundColor(.secondary)
+                    )
                     .padding(.horizontal, 28)
 
                 VStack(spacing: 8) {
@@ -88,7 +93,7 @@ struct NowPlayingView: View {
 
                     Text(vm.playStatus.isEmpty ? "ZMusic" : vm.playStatus)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                 }
                 .padding(.horizontal)
@@ -96,7 +101,7 @@ struct NowPlayingView: View {
                 HStack(spacing: 52) {
                     Image(systemName: "backward.fill")
                         .font(.title2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundColor(.secondary.opacity(0.5))
 
                     Button {
                         if vm.isPlaying {
@@ -107,41 +112,40 @@ struct NowPlayingView: View {
                     } label: {
                         ZStack {
                             Circle()
-                                .fill(.primary)
+                                .fill(Color.primary)
                                 .frame(width: 72, height: 72)
 
                             if vm.isPlayLoading {
                                 ProgressView()
-                                    .tint(Color(.systemBackground))
+                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(.systemBackground)))
                             } else {
                                 Image(systemName: vm.isPlaying ? "stop.fill" : "play.fill")
                                     .font(.title2)
-                                    .foregroundStyle(Color(.systemBackground))
+                                    .foregroundColor(Color(.systemBackground))
                             }
                         }
                     }
 
                     Image(systemName: "forward.fill")
                         .font(.title2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundColor(.secondary.opacity(0.5))
                 }
 
                 if !vm.playUrl.isEmpty {
                     Text("歌曲 ID：\(vm.testSongId)")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundColor(.secondary)
                 }
 
                 Spacer()
             }
-            .navigationTitle("正在播放")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+            .navigationBarTitle("正在播放", displayMode: .inline)
+            .navigationBarItems(
+                leading: Button("关闭") {
+                    presentationMode.wrappedValue.dismiss()
                 }
-            }
+            )
         }
-        .presentationDetents([.large])
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
