@@ -26,6 +26,8 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes:
           - audio
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         NSAppTransportSecurity:
           NSExceptionDomains:
             music.126.net:

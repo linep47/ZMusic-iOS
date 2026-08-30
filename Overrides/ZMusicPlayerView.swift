@@ -65,6 +65,10 @@ struct NowPlayingView: View {
     @State private var seekingValue: Double = 0
     @State private var isSeeking = false
     @State private var showQueue = false
+    @State private var showComments = false
+    @State private var comments: [[String: Any]] = []
+    @State private var commentText = ""
+    @State private var commentMessage = ""
 
     var body: some View {
         ZStack {
@@ -112,6 +116,60 @@ struct NowPlayingView: View {
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button("完成") { showQueue = false }
+                    }
+                }
+            }
+        }        .sheet(isPresented: $showComments) {
+            NavigationView {
+                VStack(spacing: 0) {
+                    List {
+                        if comments.isEmpty {
+                            Text(commentMessage.isEmpty ? "暂无评论" : commentMessage)
+                                .foregroundColor(.secondary)
+                        }
+
+                        ForEach(Array(comments.enumerated()), id: \.offset) { _, item in
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text(commentUser(item))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.secondary)
+
+                                Text(item["content"] as? String ?? "")
+                                    .font(.body)
+
+                                if let count = intOptional(item["likedCount"]), count > 0 {
+                                    Text("♥ \(count)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+
+                                if let commentId = intOptional(item["commentId"]) {
+                                    Button("回复") {
+                                        commentText = "@\(commentUser(item)) "
+                                        UserDefaults.standard.set(commentId, forKey: "ZMusicReplyCommentId")
+                                    }
+                                    .font(.caption)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        TextField("发表评论或回复", text: $commentText)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                        Button("发送") {
+                            sendComment()
+                        }
+                        .disabled(commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding()
+                }
+                .navigationTitle("歌曲评论")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("完成") { showComments = false }
                     }
                 }
             }
@@ -258,10 +316,30 @@ struct NowPlayingView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(vm.playSongName.isEmpty ? "未播放歌曲" : vm.playSongName).font(.title2.bold()).foregroundColor(.white).lineLimit(1)
                 Text(vm.playArtistName.isEmpty ? "ZMusic" : vm.playArtistName).font(.subheadline).foregroundColor(.white.opacity(0.55)).lineLimit(1)
+                if !vm.downloadStatus.isEmpty {
+                    Text(vm.downloadStatus)
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.42))
+                        .lineLimit(1)
+                }
             }
             Spacer()
-            Button { zMusicHaptic(.light) } label: {
-                Image(systemName: "heart").font(.title3).foregroundColor(.white)
+            Menu {
+                Button {
+                    loadComments()
+                } label: {
+                    Label("歌曲评论", systemImage: "bubble.left")
+                }
+
+                Button {
+                    Task { await vm.zMusicDownloadCurrentSong() }
+                } label: {
+                    Label("下载歌曲", systemImage: "arrow.down.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.title3)
+                    .foregroundColor(.white)
             }
             .buttonStyle(ZMusicSpringButtonStyle())
         }
@@ -356,6 +434,77 @@ struct NowPlayingView: View {
             Image(systemName: icon).font(.system(size: size, weight: .semibold)).foregroundColor(.white).frame(width: 44, height: 44)
         }
         .buttonStyle(ZMusicSpringButtonStyle())
+    }
+
+    private func loadComments() {
+        showComments = true
+        comments = []
+        commentMessage = "正在加载..."
+        let songId = Int(vm.testSongId) ?? 0
+        guard songId > 0 else {
+            commentMessage = "当前歌曲无效"
+            return
+        }
+
+        Task {
+            do {
+                let response = try await vm.client.commentMusic(id: songId, limit: 50, offset: 0)
+                comments =
+                    response.body["comments"] as? [[String: Any]]
+                    ?? response.body["hotComments"] as? [[String: Any]]
+                    ?? []
+                commentMessage = comments.isEmpty ? "暂无评论" : ""
+            } catch {
+                commentMessage = "评论加载失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func sendComment() {
+        let songId = Int(vm.testSongId) ?? 0
+        let text = commentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard songId > 0, !text.isEmpty else { return }
+
+        let replyId = UserDefaults.standard.integer(forKey: "ZMusicReplyCommentId")
+        Task {
+            do {
+                if replyId > 0 {
+                    _ = try await vm.client.comment(
+                        action: .reply,
+                        type: .song,
+                        id: songId,
+                        content: text,
+                        commentId: replyId
+                    )
+                    UserDefaults.standard.removeObject(forKey: "ZMusicReplyCommentId")
+                } else {
+                    _ = try await vm.client.comment(
+                        action: .add,
+                        type: .song,
+                        id: songId,
+                        content: text
+                    )
+                }
+                commentText = ""
+                loadComments()
+            } catch {
+                commentMessage = "发送失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func commentUser(_ item: [String: Any]) -> String {
+        if let user = item["user"] as? [String: Any] {
+            return user["nickname"] as? String ?? "用户"
+        }
+        return "用户"
+    }
+
+    private func intOptional(_ value: Any?) -> Int? {
+        if let v = value as? Int { return v }
+        if let v = value as? NSNumber { return v.intValue }
+        if let v = value as? String { return Int(v) }
+        return nil
     }
 
     private var playModeIcon: String {

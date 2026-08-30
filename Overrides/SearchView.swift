@@ -14,8 +14,7 @@ struct SearchView: View {
     private let types: [(SearchType, String)] = [
         (.single, "歌曲"),
         (.playlist, "歌单"),
-        (.artist, "歌手"),
-        (.mv, "MV")
+        (.artist, "歌手")
     ]
 
     var body: some View {
@@ -193,18 +192,20 @@ struct SearchView: View {
             .buttonStyle(PlainButtonStyle())
 
         case .artist:
-            commonRow(
-                title: item["name"] as? String ?? "未知歌手",
-                subtitle: "歌手",
-                icon: "person.wave.2"
-            )
-
-        case .mv:
-            commonRow(
-                title: item["name"] as? String ?? "未知 MV",
-                subtitle: mvArtist(item),
-                icon: "play.rectangle"
-            )
+            NavigationLink(
+                destination: ZMusicArtistDetailView(
+                    vm: vm,
+                    artistId: intValue(item["id"]),
+                    artistName: item["name"] as? String ?? "歌手"
+                )
+            ) {
+                commonRow(
+                    title: item["name"] as? String ?? "未知歌手",
+                    subtitle: "歌手",
+                    icon: "person.wave.2"
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
 
         default:
             commonRow(title: item["name"] as? String ?? "结果", subtitle: "", icon: "magnifyingglass")
@@ -259,8 +260,6 @@ struct SearchView: View {
                     localResults = result["playlists"] as? [[String: Any]] ?? []
                 case .artist:
                     localResults = result["artists"] as? [[String: Any]] ?? []
-                case .mv:
-                    localResults = result["mvs"] as? [[String: Any]] ?? []
                 default:
                     localResults = []
                 }
@@ -308,11 +307,6 @@ struct SearchView: View {
         return "歌单"
     }
 
-    private func mvArtist(_ item: [String: Any]) -> String {
-        item["artistName"] as? String
-            ?? item["artist"] as? String
-            ?? "MV"
-    }
 
     private func intValue(_ value: Any?) -> Int {
         if let v = value as? Int { return v }

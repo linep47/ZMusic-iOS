@@ -4,6 +4,9 @@ import re
 p = Path("upstream/Example/Sources/DemoViewModel.swift")
 s = p.read_text(encoding="utf-8")
 
+if "import MediaPlayer" not in s:
+    s = s.replace("import AVFoundation", "import AVFoundation\nimport MediaPlayer", 1)
+
 def must_replace(old, new, label):
     global s
     if old not in s:
@@ -22,6 +25,10 @@ must_replace(
             self.cookie = saved
             Task { await self.fetchLoginStatus() }
         }
+        if let lastId = UserDefaults.standard.string(forKey: "ZMusicLastSongId"), !lastId.isEmpty {
+            self.testSongId = lastId
+        }
+        setupRemoteCommands()
         print("[NCMDemo] 客户端初始化完成")
     }''',
 "init"
@@ -71,7 +78,8 @@ must_replace(
     @Published var playLyricLines: [String] = []
     @Published var playLyricTimeline: [ZMusicLyricLine] = []
     @Published var playQueue: [[String: Any]] = []
-    @Published var playMode: Int = 0
+    @Published var playMode: Int = UserDefaults.standard.integer(forKey: "ZMusicPlayMode")
+    @Published var downloadStatus: String = ""
     private var audioPlayer: AVPlayer?
     private var playTimeObserver: Any?''',
 "player props"
@@ -118,12 +126,15 @@ s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func sto
                 if time.seconds.isFinite { self.playCurrentTime = max(0, time.seconds) }
                 let duration = player.currentItem?.duration.seconds ?? 0
                 if duration.isFinite && duration > 0 { self.playDuration = duration }
+                self.updateNowPlayingInfo()
             }
             player.play()
             playUrl = u
             isPlaying = true
             playStatus = "正在播放"
             playCurrentTime = 0
+            UserDefaults.standard.set(testSongId, forKey: "ZMusicLastSongId")
+            updateNowPlayingInfo()
             do {
                 let lyricResp = try await client.lyric(id: songId)
                 let raw = (lyricResp.body["lrc"] as? [String: Any])?["lyric"] as? String ?? ""
@@ -143,6 +154,7 @@ s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func sto
         guard let player = audioPlayer else { Task { await testPlaySong() }; return }
         if isPlaying { player.pause(); isPlaying = false; playStatus = "已暂停" }
         else { player.play(); isPlaying = true; playStatus = "正在播放" }
+        updateNowPlayingInfo()
     }
 
     func seek(to seconds: Double) {
@@ -151,6 +163,7 @@ s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func sto
         let safe = max(0, min(seconds, maxValue))
         player.seek(to: CMTime(seconds: safe, preferredTimescale: 600))
         playCurrentTime = safe
+        updateNowPlayingInfo()
     }
 
     func restartCurrentTrack() {
@@ -204,6 +217,94 @@ s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func sto
 
     func zMusicCyclePlayMode() {
         playMode = (playMode + 1) % 3
+        UserDefaults.standard.set(playMode, forKey: "ZMusicPlayMode")
+    }
+
+    func updateNowPlayingInfo() {
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        info[MPMediaItemPropertyTitle] = playSongName
+        info[MPMediaItemPropertyArtist] = playArtistName
+        info[MPMediaItemPropertyPlaybackDuration] = playDuration
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = playCurrentTime
+        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    func setupRemoteCommands() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.nextTrackCommand.isEnabled = true
+        commandCenter.previousTrackCommand.isEnabled = true
+        commandCenter.changePlaybackPositionCommand.isEnabled = true
+
+        commandCenter.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                if !self.isPlaying { self.togglePlayback() }
+            }
+            return .success
+        }
+
+        commandCenter.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                if self.isPlaying { self.togglePlayback() }
+            }
+            return .success
+        }
+
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.zMusicNextTrack() }
+            return .success
+        }
+
+        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.zMusicPreviousTrack() }
+            return .success
+        }
+
+        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let positionEvent = event as? MPChangePlaybackPositionCommandEvent else {
+                return .commandFailed
+            }
+            Task { @MainActor in self?.seek(to: positionEvent.positionTime) }
+            return .success
+        }
+    }
+
+    func zMusicDownloadCurrentSong() async {
+        guard let url = URL(string: playUrl), !playUrl.isEmpty else {
+            downloadStatus = "当前歌曲没有可下载地址"
+            return
+        }
+
+        downloadStatus = "正在下载..."
+        do {
+            let (temporaryURL, _) = try await URLSession.shared.download(from: url)
+            let fm = FileManager.default
+            let documents = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let folder = documents.appendingPathComponent("ZMusic Downloads", isDirectory: true)
+
+            if !fm.fileExists(atPath: folder.path) {
+                try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            }
+
+            let safeName = playSongName
+                .replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: ":", with: "-")
+            let filename = safeName.isEmpty ? "ZMusic-\(testSongId).m4a" : "\(safeName).m4a"
+            let target = folder.appendingPathComponent(filename)
+
+            if fm.fileExists(atPath: target.path) {
+                try fm.removeItem(at: target)
+            }
+            try fm.moveItem(at: temporaryURL, to: target)
+            downloadStatus = "已保存：\(filename)"
+        } catch {
+            downloadStatus = "下载失败：\(error.localizedDescription)"
+        }
     }
 
     func stopPlaying()''', s, count=1, flags=re.S)
