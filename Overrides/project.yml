@@ -21,6 +21,8 @@ targets:
     info:
       path: Info.plist
       properties:
+        CFBundleDisplayName: Muse
+        CFBundleName: Muse
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen: {}
