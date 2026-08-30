@@ -512,7 +512,7 @@ private struct ZMusicLoginGateView: View {
             } catch {
                 message = "登录失败：\(error.localizedDescription)"
             }
-            password = ""
+            self.password = ""
             isSubmitting = false
         }
     }
