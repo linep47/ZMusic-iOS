@@ -22,9 +22,16 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Lincb522/NeteaseCloudMusicAPI-Swift.git upstream
 
+      - name: Apply iOS 15 overrides
+        run: |
           cp "$GITHUB_WORKSPACE/Overrides/ContentView.swift" upstream/Example/Sources/ContentView.swift
           cp "$GITHUB_WORKSPACE/Overrides/SearchView.swift" upstream/Example/Sources/SearchView.swift
           cp "$GITHUB_WORKSPACE/Overrides/ZMusicPlayerView.swift" upstream/Example/Sources/ZMusicPlayerView.swift
+          cp "$GITHUB_WORKSPACE/Overrides/project.yml" upstream/Example/project.yml
+
+          brew install xcodegen
+          cd upstream/Example
+          xcodegen generate
 
       - name: Detect Xcode scheme
         id: scheme
