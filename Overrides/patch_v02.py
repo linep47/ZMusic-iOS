@@ -4,7 +4,13 @@ import re
 p = Path("upstream/Example/Sources/DemoViewModel.swift")
 s = p.read_text(encoding="utf-8")
 
-s = s.replace(
+def must_replace(old, new, label):
+    global s
+    if old not in s:
+        raise SystemExit(f"[v0.3] target not found: {label}")
+    s = s.replace(old, new, 1)
+
+must_replace(
 '''    init() {
         self.client = NCMClient()
         print("[NCMDemo] 客户端初始化完成")
@@ -17,22 +23,24 @@ s = s.replace(
             Task { await self.fetchLoginStatus() }
         }
         print("[NCMDemo] 客户端初始化完成")
-    }'''
+    }''',
+"init"
 )
 
-s = s.replace(
-'''                    print("[NCMDemo] 📋 Cookie: \(currentCookies.prefix(100))...")
+must_replace(
+'''                    print("[NCMDemo] 📋 Cookie: \\(currentCookies.prefix(100))...")
                     // 自动获取用户信息
                     await fetchLoginStatus()''',
-'''                    print("[NCMDemo] 📋 Cookie: \(currentCookies.prefix(100))...")
+'''                    print("[NCMDemo] 📋 Cookie: \\(currentCookies.prefix(100))...")
                     if !currentCookies.isEmpty {
                         ZMusicSessionStore.save(currentCookies)
                         cookie = currentCookies
                     }
-                    await fetchLoginStatus()'''
+                    await fetchLoginStatus()''',
+"qr"
 )
 
-s = s.replace(
+must_replace(
 '''            isLoggedIn = false
             loginNickname = ""
             qrImage = nil''',
@@ -40,114 +48,109 @@ s = s.replace(
             loginNickname = ""
             qrImage = nil
             cookie = ""
-            ZMusicSessionStore.delete()'''
+            ZMusicSessionStore.delete()''',
+"logout"
 )
 
-s = re.sub(
-r'''    func searchSongs\(\) async \{.*?\n    \}\n\n    func fetchLyric''',
-'''    func searchSongs() async {
-        let keyword = searchKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !keyword.isEmpty else { return }
-        isLoading = true
-        errorMessage = nil
-        searchResults = []
+must_replace(
+'''    @Published var isPlaying: Bool = false
+    @Published var isPlayLoading: Bool = false
+    private var audioPlayer: AVPlayer?''',
+'''    @Published var isPlaying: Bool = false
+    @Published var isPlayLoading: Bool = false
+    @Published var playArtistName: String = ""
+    @Published var playArtworkURL: String = ""
+    @Published var playCurrentTime: Double = 0
+    @Published var playDuration: Double = 0
+    @Published var playLyricLines: [String] = []
+    private var audioPlayer: AVPlayer?
+    private var playTimeObserver: Any?''',
+"player props"
+)
 
-        do {
-            let cloud = try await client.cloudsearch(keywords: keyword, type: .single, limit: 30)
-            if let result = cloud.body["result"] as? [String: Any],
-               let songs = result["songs"] as? [[String: Any]], !songs.isEmpty {
-                searchResults = songs
-            } else {
-                let normal = try await client.search(keywords: keyword, type: .single, limit: 30)
-                if let result = normal.body["result"] as? [String: Any],
-                   let songs = result["songs"] as? [[String: Any]] {
-                    searchResults = songs
-                } else {
-                    errorMessage = "未找到结果"
-                }
-            }
-        } catch {
-            do {
-                let normal = try await client.search(keywords: keyword, type: .single, limit: 30)
-                if let result = normal.body["result"] as? [String: Any],
-                   let songs = result["songs"] as? [[String: Any]] {
-                    searchResults = songs
-                }
-            } catch {
-                errorMessage = "搜索失败: \(error.localizedDescription)"
-            }
-        }
-        isLoading = false
-    }
-
-    func fetchLyric''',
-s, count=1, flags=re.S)
-
-s = re.sub(
-r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func stopPlaying\(\)''',
-'''    func testPlaySong() async {
+s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func stopPlaying\(\)''', '''    func testPlaySong() async {
         guard let songId = Int(testSongId) else { return }
         isPlayLoading = true
         playStatus = "正在获取播放地址..."
         playUrl = ""
-
         do {
             let detail = try await client.songDetail(ids: [songId])
-            if let songs = detail.body["songs"] as? [[String: Any]],
-               let song = songs.first {
-                let name = song["name"] as? String ?? "未知歌曲"
-                let artist = DemoViewModel.artistNames(from: song)
-                playSongName = artist.isEmpty ? name : "\(name) - \(artist)"
+            if let songs = detail.body["songs"] as? [[String: Any]], let song = songs.first {
+                playSongName = song["name"] as? String ?? "未知歌曲"
+                playArtistName = DemoViewModel.artistNames(from: song)
+                if let album = song["al"] as? [String: Any] {
+                    playArtworkURL = album["picUrl"] as? String ?? ""
+                }
             }
-
             var urlString: String?
-
             let high = try await client.songUrlV1(ids: [songId], level: .exhigh)
-            if let data = high.body["data"] as? [[String: Any]],
-               let url = data.first?["url"] as? String, !url.isEmpty {
-                urlString = url
-            }
-
+            if let data = high.body["data"] as? [[String: Any]], let url = data.first?["url"] as? String, !url.isEmpty { urlString = url }
             if urlString == nil {
                 let standard = try await client.songUrlV1(ids: [songId], level: .standard)
-                if let data = standard.body["data"] as? [[String: Any]],
-                   let url = data.first?["url"] as? String, !url.isEmpty {
-                    urlString = url
-                }
+                if let data = standard.body["data"] as? [[String: Any]], let url = data.first?["url"] as? String, !url.isEmpty { urlString = url }
             }
-
             if urlString == nil {
                 let legacy = try await client.songUrl(ids: [songId], br: 320000)
-                if let data = legacy.body["data"] as? [[String: Any]],
-                   let url = data.first?["url"] as? String, !url.isEmpty {
-                    urlString = url
-                }
+                if let data = legacy.body["data"] as? [[String: Any]], let url = data.first?["url"] as? String, !url.isEmpty { urlString = url }
             }
-
             guard let u = urlString, let url = URL(string: u) else {
-                playStatus = "没有可用播放地址"
-                isPlayLoading = false
-                return
+                playStatus = "没有可用播放地址"; isPlayLoading = false; return
             }
-
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
             try AVAudioSession.sharedInstance().setActive(true)
+            if let observer = playTimeObserver { audioPlayer?.removeTimeObserver(observer); playTimeObserver = nil }
             audioPlayer?.pause()
-            audioPlayer = AVPlayer(playerItem: AVPlayerItem(url: url))
-            audioPlayer?.play()
+            let player = AVPlayer(playerItem: AVPlayerItem(url: url))
+            audioPlayer = player
+            let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+            playTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+                guard let self = self else { return }
+                if time.seconds.isFinite { self.playCurrentTime = max(0, time.seconds) }
+                let duration = player.currentItem?.duration.seconds ?? 0
+                if duration.isFinite && duration > 0 { self.playDuration = duration }
+            }
+            player.play()
             playUrl = u
             isPlaying = true
             playStatus = "正在播放"
+            playCurrentTime = 0
+            do {
+                let lyricResp = try await client.lyric(id: songId)
+                let raw = (lyricResp.body["lrc"] as? [String: Any])?["lyric"] as? String ?? ""
+                playLyricLines = raw.components(separatedBy: .newlines).compactMap { line in
+                    let stripped = line.replacingOccurrences(of: #"^\\[[^\\]]+\\]"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+                    return stripped.isEmpty ? nil : stripped
+                }
+            } catch { playLyricLines = [] }
         } catch {
-            playStatus = "播放失败: \(error.localizedDescription)"
+            playStatus = "播放失败: \\(error.localizedDescription)"
             isPlaying = false
         }
-
         isPlayLoading = false
     }
 
-    func stopPlaying()''',
-s, count=1, flags=re.S)
+    func togglePlayback() {
+        guard let player = audioPlayer else { Task { await testPlaySong() }; return }
+        if isPlaying { player.pause(); isPlaying = false; playStatus = "已暂停" }
+        else { player.play(); isPlaying = true; playStatus = "正在播放" }
+    }
+
+    func seek(to seconds: Double) {
+        guard let player = audioPlayer else { return }
+        let maxValue = playDuration > 0 ? playDuration : seconds
+        let safe = max(0, min(seconds, maxValue))
+        player.seek(to: CMTime(seconds: safe, preferredTimescale: 600))
+        playCurrentTime = safe
+    }
+
+    func restartCurrentTrack() {
+        seek(to: 0)
+        if !isPlaying { audioPlayer?.play(); isPlaying = true; playStatus = "正在播放" }
+    }
+
+    func stopPlaying()''', s, count=1, flags=re.S)
+if n != 1:
+    raise SystemExit("[v0.3] playback target not found")
 
 p.write_text(s, encoding="utf-8")
-print("patched")
+print("[v0.3] patched")
