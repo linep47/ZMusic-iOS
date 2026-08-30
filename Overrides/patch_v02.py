@@ -62,7 +62,16 @@ must_replace(
     @Published var playArtworkURL: String = ""
     @Published var playCurrentTime: Double = 0
     @Published var playDuration: Double = 0
+    struct ZMusicLyricLine: Identifiable {
+        let id = UUID()
+        let time: Double
+        let text: String
+    }
+
     @Published var playLyricLines: [String] = []
+    @Published var playLyricTimeline: [ZMusicLyricLine] = []
+    @Published var playQueue: [[String: Any]] = []
+    @Published var playMode: Int = 0
     private var audioPlayer: AVPlayer?
     private var playTimeObserver: Any?''',
 "player props"
@@ -81,6 +90,7 @@ s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func sto
                 if let album = song["al"] as? [String: Any] {
                     playArtworkURL = album["picUrl"] as? String ?? ""
                 }
+                zMusicEnqueueCurrentSong(song)
             }
             var urlString: String?
             let high = try await client.songUrlV1(ids: [songId], level: .exhigh)
@@ -146,6 +156,54 @@ s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func sto
     func restartCurrentTrack() {
         seek(to: 0)
         if !isPlaying { audioPlayer?.play(); isPlaying = true; playStatus = "正在播放" }
+    }
+
+    func zMusicEnqueueCurrentSong(_ song: [String: Any]) {
+        guard let id = song["id"] as? Int ?? (song["id"] as? NSNumber)?.intValue else { return }
+        if !playQueue.contains(where: {
+            (($0["id"] as? Int) ?? ($0["id"] as? NSNumber)?.intValue) == id
+        }) {
+            playQueue.append(song)
+        }
+    }
+
+    func zMusicPlayQueueItem(at index: Int) {
+        guard !playQueue.isEmpty else { return }
+        let safe = max(0, min(index, playQueue.count - 1))
+        let song = playQueue[safe]
+        let id = (song["id"] as? Int) ?? (song["id"] as? NSNumber)?.intValue ?? 0
+        guard id > 0 else { return }
+        testSongId = String(id)
+        Task { await testPlaySong() }
+    }
+
+    func zMusicNextTrack() {
+        guard !playQueue.isEmpty else { return }
+        let current = Int(testSongId) ?? 0
+        let index = playQueue.firstIndex {
+            (($0["id"] as? Int) ?? ($0["id"] as? NSNumber)?.intValue ?? 0) == current
+        } ?? 0
+
+        if playMode == 1 {
+            zMusicPlayQueueItem(at: index)
+        } else if playMode == 2 {
+            zMusicPlayQueueItem(at: Int.random(in: 0..<playQueue.count))
+        } else {
+            zMusicPlayQueueItem(at: (index + 1) % playQueue.count)
+        }
+    }
+
+    func zMusicPreviousTrack() {
+        guard !playQueue.isEmpty else { restartCurrentTrack(); return }
+        let current = Int(testSongId) ?? 0
+        let index = playQueue.firstIndex {
+            (($0["id"] as? Int) ?? ($0["id"] as? NSNumber)?.intValue ?? 0) == current
+        } ?? 0
+        zMusicPlayQueueItem(at: (index - 1 + playQueue.count) % playQueue.count)
+    }
+
+    func zMusicCyclePlayMode() {
+        playMode = (playMode + 1) % 3
     }
 
     func stopPlaying()''', s, count=1, flags=re.S)

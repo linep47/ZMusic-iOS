@@ -64,6 +64,7 @@ struct NowPlayingView: View {
     @State private var contentDrag: CGFloat = 0
     @State private var seekingValue: Double = 0
     @State private var isSeeking = false
+    @State private var showQueue = false
 
     var body: some View {
         ZStack {
@@ -83,6 +84,37 @@ struct NowPlayingView: View {
         .onAppear { seekingValue = vm.playCurrentTime }
         .onChange(of: vm.playCurrentTime) { value in
             if !isSeeking { seekingValue = value }
+        }
+        .sheet(isPresented: $showQueue) {
+            NavigationView {
+                List {
+                    if vm.playQueue.isEmpty {
+                        Text("播放队列为空")
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(Array(vm.playQueue.enumerated()), id: \.offset) { index, song in
+                            Button {
+                                vm.zMusicPlayQueueItem(at: index)
+                                showQueue = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(song["name"] as? String ?? "未知歌曲")
+                                        .foregroundColor(.primary)
+                                    Text(DemoViewModel.artistNames(from: song))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("播放队列")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("完成") { showQueue = false }
+                    }
+                }
+            }
         }
     }
 
@@ -118,7 +150,7 @@ struct NowPlayingView: View {
                     .font(.caption.weight(.semibold)).foregroundColor(.white).lineLimit(1).frame(maxWidth: 180)
             }
             Spacer()
-            circleButton("ellipsis") { zMusicHaptic(.light) }
+            circleButton(playModeIcon) { zMusicHaptic(.light); vm.zMusicCyclePlayMode() }
         }
     }
 
@@ -158,24 +190,67 @@ struct NowPlayingView: View {
     }
 
     private var lyricsContent: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
-                if vm.playLyricLines.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "quote.bubble").font(.system(size: 42, weight: .light)).foregroundColor(.white.opacity(0.5))
-                        Text("暂无歌词").font(.title3.weight(.semibold)).foregroundColor(.white.opacity(0.8))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 120)
-                } else {
-                    ForEach(Array(vm.playLyricLines.enumerated()), id: \.offset) { _, line in
-                        Text(line).font(.title3.weight(.semibold)).foregroundColor(.white.opacity(0.88)).frame(maxWidth: .infinity, alignment: .leading)
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
+                    if vm.playLyricTimeline.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "quote.bubble")
+                                .font(.system(size: 42, weight: .light))
+                                .foregroundColor(.white.opacity(0.5))
+                            Text("暂无歌词")
+                                .font(.title3.weight(.semibold))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 120)
+                    } else {
+                        ForEach(Array(vm.playLyricTimeline.enumerated()), id: \.element.id) { index, line in
+                            Button {
+                                vm.seek(to: line.time)
+                                zMusicHaptic(.light)
+                            } label: {
+                                Text(line.text)
+                                    .font(.system(size: activeLyricIndex == index ? 22 : 18,
+                                                  weight: activeLyricIndex == index ? .bold : .regular))
+                                    .foregroundColor(activeLyricIndex == index ? .white : .white.opacity(0.38))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .animation(.easeInOut(duration: 0.22), value: activeLyricIndex)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .id(index)
+                        }
                     }
                 }
+                .padding(.vertical, 150)
             }
-            .padding(.vertical, 34)
+            .onChange(of: activeLyricIndex) { index in
+                guard showLyrics, index >= 0 else { return }
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(index, anchor: .center)
+                }
+            }
         }
-        .mask(LinearGradient(gradient: Gradient(colors: [.clear, .black, .black, .clear]), startPoint: .top, endPoint: .bottom))
+        .mask(
+            LinearGradient(
+                gradient: Gradient(colors: [.clear, .black, .black, .clear]),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    private var activeLyricIndex: Int {
+        guard !vm.playLyricTimeline.isEmpty else { return -1 }
+        var result = 0
+        for (index, line) in vm.playLyricTimeline.enumerated() {
+            if line.time <= vm.playCurrentTime + 0.15 {
+                result = index
+            } else {
+                break
+            }
+        }
+        return result
     }
 
     private var trackInfo: some View {
@@ -240,9 +315,9 @@ struct NowPlayingView: View {
 
     private var controls: some View {
         HStack {
-            controlButton("list.bullet") { zMusicHaptic(.light) }
+            controlButton("list.bullet") { zMusicHaptic(.light); showQueue = true }
             Spacer()
-            controlButton("backward.fill", size: 25) { zMusicHaptic(.light); vm.restartCurrentTrack() }
+            controlButton("backward.fill", size: 25) { zMusicHaptic(.light); vm.zMusicPreviousTrack() }
             Spacer()
             Button {
                 zMusicHaptic(.medium)
@@ -259,7 +334,7 @@ struct NowPlayingView: View {
             }
             .buttonStyle(ZMusicSpringButtonStyle())
             Spacer()
-            controlButton("forward.fill", size: 25) { zMusicHaptic(.light); vm.seek(to: min(vm.playDuration, vm.playCurrentTime + 15)) }
+            controlButton("forward.fill", size: 25) { zMusicHaptic(.light); vm.zMusicNextTrack() }
             Spacer()
             controlButton(showLyrics ? "square.stack.fill" : "quote.bubble") {
                 zMusicHaptic(.light)
@@ -281,6 +356,14 @@ struct NowPlayingView: View {
             Image(systemName: icon).font(.system(size: size, weight: .semibold)).foregroundColor(.white).frame(width: 44, height: 44)
         }
         .buttonStyle(ZMusicSpringButtonStyle())
+    }
+
+    private var playModeIcon: String {
+        switch vm.playMode {
+        case 1: return "repeat.1"
+        case 2: return "shuffle"
+        default: return "repeat"
+        }
     }
 
     private func timeString(_ value: Double) -> String {
