@@ -5,7 +5,8 @@ on:
   push:
     paths:
       - '.github/workflows/build-ipa.yml'
-
+      - 'Overrides/**'
+      
 jobs:
   build:
     runs-on: macos-latest
@@ -31,6 +32,9 @@ jobs:
           cp "$GITHUB_WORKSPACE/Overrides/PlaylistView.swift" upstream/Example/Sources/PlaylistView.swift
           cp "$GITHUB_WORKSPACE/Overrides/ZMusicSessionStore.swift" upstream/Example/Sources/ZMusicSessionStore.swift
           cp "$GITHUB_WORKSPACE/Overrides/project.yml" upstream/Example/project.yml
+
+          rm -rf upstream/Example/Assets.xcassets
+          cp -R "$GITHUB_WORKSPACE/Overrides/Assets.xcassets" upstream/Example/Assets.xcassets
 
           python3 "$GITHUB_WORKSPACE/Overrides/patch_v02.py"
 
