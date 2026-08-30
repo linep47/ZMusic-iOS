@@ -1,0 +1,68 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-ipa.yml'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Clone NeteaseCloudMusicAPI-Swift
+        run: |
+          git clone --depth 1 https://github.com/Lincb522/NeteaseCloudMusicAPI-Swift.git upstream
+
+      - name: Detect Xcode scheme
+        id: scheme
+        run: |
+          cd upstream/Example
+          xcodebuild -list -project NCMDemo.xcodeproj
+          SCHEME=$(xcodebuild -list -json -project NCMDemo.xcodeproj | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["project"]["schemes"][0])')
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+
+      - name: Build iPhone app without signing
+        run: |
+          cd upstream/Example
+          xcodebuild \
+            -project NCMDemo.xcodeproj \
+            -scheme '${{ steps.scheme.outputs.scheme }}' \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$GITHUB_WORKSPACE/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          APP=$(find "$GITHUB_WORKSPACE/DerivedData/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name '*.app' | head -n 1)
+
+          if [ -z "$APP" ]; then
+            echo "No .app bundle found."
+            exit 1
+          fi
+
+          mkdir -p "$GITHUB_WORKSPACE/package/Payload"
+          cp -R "$APP" "$GITHUB_WORKSPACE/package/Payload/"
+
+          cd "$GITHUB_WORKSPACE/package"
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/ZMusic-iOS-unsigned.ipa" Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZMusic-iOS-unsigned-IPA
+          path: ZMusic-iOS-unsigned.ipa
+          retention-days: 30
