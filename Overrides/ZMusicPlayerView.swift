@@ -96,6 +96,24 @@ struct NowPlayingView: View {
                         Text("播放队列为空")
                             .foregroundColor(.secondary)
                     } else {
+                        Section {
+                            Button {
+                                vm.zMusicPlayQueueItem(at: 0)
+                                showQueue = false
+                            } label: {
+                                HStack {
+                                    Image(systemName: "play.fill")
+                                    Text("播放全部")
+                                        .fontWeight(.semibold)
+                                    Spacer()
+                                    Text("\(vm.playQueue.count) 首")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+
+                        Section("接下来播放") {
                         ForEach(Array(vm.playQueue.enumerated()), id: \.offset) { index, song in
                             Button {
                                 vm.zMusicPlayQueueItem(at: index)
@@ -109,6 +127,7 @@ struct NowPlayingView: View {
                                         .foregroundColor(.secondary)
                                 }
                             }
+                        }
                         }
                     }
                 }

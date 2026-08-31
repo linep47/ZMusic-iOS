@@ -137,12 +137,80 @@ s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func sto
             updateNowPlayingInfo()
             do {
                 let lyricResp = try await client.lyric(id: songId)
-                let raw = (lyricResp.body["lrc"] as? [String: Any])?["lyric"] as? String ?? ""
-                playLyricLines = raw.components(separatedBy: .newlines).compactMap { line in
-                    let stripped = line.replacingOccurrences(of: #"^\\[[^\\]]+\\]"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
-                    return stripped.isEmpty ? nil : stripped
+                let raw =
+                    (lyricResp.body["lrc"] as? [String: Any])?["lyric"] as? String
+                    ?? (lyricResp.body["klyric"] as? [String: Any])?["lyric"] as? String
+                    ?? ""
+
+                var timeline: [ZMusicLyricLine] = []
+                let timeRegex = try NSRegularExpression(
+                    pattern: #"\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]"#
+                )
+
+                for sourceLine in raw.components(separatedBy: .newlines) {
+                    let nsRange = NSRange(sourceLine.startIndex..<sourceLine.endIndex, in: sourceLine)
+                    let matches = timeRegex.matches(in: sourceLine, range: nsRange)
+                    guard !matches.isEmpty else { continue }
+
+                    let lyricText = timeRegex
+                        .stringByReplacingMatches(
+                            in: sourceLine,
+                            range: nsRange,
+                            withTemplate: ""
+                        )
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    guard !lyricText.isEmpty else { continue }
+
+                    for match in matches {
+                        guard
+                            let minuteRange = Range(match.range(at: 1), in: sourceLine),
+                            let secondRange = Range(match.range(at: 2), in: sourceLine)
+                        else { continue }
+
+                        let minutes = Double(sourceLine[minuteRange]) ?? 0
+                        let seconds = Double(sourceLine[secondRange]) ?? 0
+
+                        var fraction = 0.0
+                        if match.range(at: 3).location != NSNotFound,
+                           let fractionRange = Range(match.range(at: 3), in: sourceLine) {
+                            let rawFraction = String(sourceLine[fractionRange])
+                            let value = Double(rawFraction) ?? 0
+                            switch rawFraction.count {
+                            case 1: fraction = value / 10
+                            case 2: fraction = value / 100
+                            default: fraction = value / 1000
+                            }
+                        }
+
+                        timeline.append(
+                            ZMusicLyricLine(
+                                time: minutes * 60 + seconds + fraction,
+                                text: lyricText
+                            )
+                        )
+                    }
                 }
-            } catch { playLyricLines = [] }
+
+                playLyricTimeline = timeline.sorted { $0.time < $1.time }
+                playLyricLines = playLyricTimeline.map { $0.text }
+
+                if playLyricTimeline.isEmpty {
+                    playLyricLines = raw.components(separatedBy: .newlines).compactMap { line in
+                        let cleaned = line
+                            .replacingOccurrences(
+                                of: #"\[[^\]]+\]"#,
+                                with: "",
+                                options: .regularExpression
+                            )
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        return cleaned.isEmpty ? nil : cleaned
+                    }
+                }
+            } catch {
+                playLyricLines = []
+                playLyricTimeline = []
+            }
         } catch {
             playStatus = "播放失败: \\(error.localizedDescription)"
             isPlaying = false

@@ -259,7 +259,7 @@ private struct ZMusicLoginGateView: View {
                     .foregroundColor(studioRed)
             }
 
-            Text("ZMusic")
+            Text("Muse")
                 .font(.system(size: 30, weight: .bold))
                 .foregroundColor(.white)
 
@@ -523,6 +523,8 @@ private struct ZMusicLoginGateView: View {
 private struct ZMusicHomeView: View {
     @ObservedObject var vm: DemoViewModel
     @State private var loaded = false
+    @State private var showAccountActions = false
+    @State private var dailyError = ""
 
     private let playlistColumns = [
         GridItem(.flexible(), spacing: 16),
@@ -558,7 +560,7 @@ private struct ZMusicHomeView: View {
             }
 
             if vm.dailyRecommendSongs.isEmpty {
-                await vm.fetchDailyRecommendSongs()
+                await loadDailyRecommendations()
             }
 
             if vm.userPlaylists.isEmpty {
@@ -582,15 +584,31 @@ private struct ZMusicHomeView: View {
 
             Spacer()
 
-            ZStack {
-                Circle()
-                    .fill(studioCard)
-                    .frame(width: 44, height: 44)
+            Button {
+                showAccountActions = true
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(studioCard)
+                        .frame(width: 44, height: 44)
 
-                Image(systemName: "person.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                }
             }
+            .buttonStyle(StudioPressStyle())
+        }
+        .confirmationDialog("账号", isPresented: $showAccountActions, titleVisibility: .visible) {
+            Button("刷新账号与歌单") {
+                Task { await vm.zMusicSyncLibrary() }
+            }
+            Button("退出登录", role: .destructive) {
+                Task { await vm.doLogout() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(vm.loginNickname.isEmpty ? "Muse" : vm.loginNickname)
         }
     }
 
@@ -660,40 +678,81 @@ private struct ZMusicHomeView: View {
 
     private var dailySection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionTitle("今日推荐")
+            HStack {
+                sectionTitle("每日推荐歌曲")
+                Spacer()
+
+                if !vm.dailyRecommendSongs.isEmpty {
+                    Button {
+                        playAll(vm.dailyRecommendSongs)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "play.fill")
+                            Text("播放全部")
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: 34)
+                        .background(studioRed)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(StudioPressStyle())
+                }
+
+                Button {
+                    Task { await loadDailyRecommendations(force: true) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(studioSecondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(StudioPressStyle())
+            }
 
             if vm.dailyRecommendSongs.isEmpty {
-                HStack(spacing: 14) {
-                    ProgressView()
-                        .progressViewStyle(
-                            CircularProgressViewStyle(tint: studioRed)
-                        )
-
-                    Text("正在加载每日推荐")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(studioSecondary)
-
-                    Spacer()
+                VStack(spacing: 12) {
+                    if dailyError.isEmpty {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: studioRed))
+                        Text("正在获取网易云每日推荐")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(studioSecondary)
+                    } else {
+                        Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                            .font(.system(size: 24))
+                            .foregroundColor(studioRed)
+                        Text(dailyError)
+                            .font(.system(size: 13))
+                            .foregroundColor(studioSecondary)
+                            .multilineTextAlignment(.center)
+                        Button("重新加载") {
+                            Task { await loadDailyRecommendations(force: true) }
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                    }
                 }
-                .padding(16)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 22)
                 .background(studioCard)
-                .clipShape(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else {
                 VStack(spacing: 0) {
                     ForEach(
-                        Array(vm.dailyRecommendSongs.prefix(5).enumerated()),
+                        Array(vm.dailyRecommendSongs.prefix(10).enumerated()),
                         id: \.offset
                     ) { index, song in
                         Button {
+                            vm.playQueue = vm.dailyRecommendSongs
                             play(song)
                         } label: {
                             songRow(song, index: index)
                         }
                         .buttonStyle(StudioPressStyle())
 
-                        if index < min(4, vm.dailyRecommendSongs.count - 1) {
+                        if index < min(9, vm.dailyRecommendSongs.count - 1) {
                             Divider()
                                 .background(Color.white.opacity(0.06))
                                 .padding(.leading, 46)
@@ -817,6 +876,34 @@ private struct ZMusicHomeView: View {
                 }
             }
         }
+    }
+
+    private func loadDailyRecommendations(force: Bool = false) async {
+        if !force && !vm.dailyRecommendSongs.isEmpty { return }
+        dailyError = ""
+
+        do {
+            let response = try await vm.client.recommendSongs()
+            let data = response.body["data"] as? [String: Any]
+            let songs =
+                data?["dailySongs"] as? [[String: Any]]
+                ?? response.body["dailySongs"] as? [[String: Any]]
+                ?? []
+
+            if songs.isEmpty {
+                dailyError = "今日推荐返回为空。可以稍后刷新一次。"
+            } else {
+                vm.dailyRecommendSongs = songs
+            }
+        } catch {
+            dailyError = "每日推荐加载失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func playAll(_ songs: [[String: Any]]) {
+        guard let first = songs.first else { return }
+        vm.playQueue = songs
+        play(first)
     }
 
     private func isLikedPlaylist(_ playlist: [String: Any]) -> Bool {
