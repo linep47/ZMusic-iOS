@@ -85,7 +85,7 @@ must_replace(
 "player props"
 )
 
-s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func stopPlaying\(\)''', '''    func testPlaySong() async {
+s, n = re.subn(r'''    func testPlaySong\(\) async \{.*?\n    \}\n\n    func stopPlaying\(\)''', lambda _match: r'''    func testPlaySong() async {
         guard let songId = Int(testSongId) else { return }
         isPlayLoading = true
         playStatus = "正在获取播放地址..."
